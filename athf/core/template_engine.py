@@ -4,19 +4,69 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+import yaml
 from jinja2 import Template
+
+
+def yaml_scalar(value) -> str:
+    """Render a value as a SAFE YAML scalar for the frontmatter block.
+
+    Implemented by asking PyYAML to emit it, rather than by hand-written
+    quoting rules. Hand-rolled rules kept losing to edge cases a fuzzer found in
+    seconds: `0x1f` round-trips as the integer 31, a form feed is rejected even
+    inside double quotes, and a literal newline in a double-quoted scalar folds
+    to a space. The emitter already knows every one of those rules, and it is
+    the same library that will parse the file back.
+
+    Written in response to a real corruption: a hunt created through the HTTP
+    API with the title `SCAN: 198.51.100.7` rendered as
+
+        title: SCAN: 198.51.100.7
+
+    which is not valid YAML ("mapping values are not allowed here"). The file
+    then failed to parse, so `list_hunts` silently skipped it (it swallows per
+    file exceptions), so `get_next_hunt_id` never saw its id — and handed the
+    SAME id out to the next hunt. Two files, one hunt_id, one of them invisible.
+
+    A colon is only the most likely trigger; a leading '#', '&', '*', '!', '%',
+    '@', '[', '{', '-' or a quote does the same, as does a value YAML would
+    coerce to a non-string (`true`, `null`, `1.0`). Quote whenever the plain
+    form is not unambiguously a string.
+    """
+    s = "" if value is None else str(value)
+    # Emit as a one-line mapping and take the value back off. width is set huge
+    # so the emitter never line-wraps (a wrapped scalar would break the single
+    # frontmatter line), and default_flow_style keeps it inline.
+    dumped = yaml.safe_dump({"v": s}, default_flow_style=False, allow_unicode=True,
+                            width=10 ** 9, sort_keys=False)
+    out = dumped[len("v:"):].strip("\n")
+    if out.endswith("\n..."):                     # document-end marker, if any
+        out = out[: -len("\n...")]
+    return out.strip()
+
+
+def yaml_flow_list(items) -> str:
+    """Render a list as a YAML flow sequence with every item safely scalared.
+
+    Empty/None entries are dropped rather than rendered as `""` — a blank
+    platform or data source is absence, not a value.
+    """
+    kept = [i for i in (items or []) if i is not None and str(i).strip()]
+    if not kept:
+        return "[]"
+    return "[" + ", ".join(yaml_scalar(i) for i in kept) + "]"
 
 # Default bundled template - used when no custom template exists
 HUNT_TEMPLATE = """---
 hunt_id: {{ hunt_id }}
-title: {{ title }}
+title: {{ title_yaml }}
 status: {{ status }}
 date: {{ date }}
-hunter: {{ hunter }}
-platform: {{ platform }}
-tactics: {{ tactics }}
-techniques: {{ techniques }}
-data_sources: {{ data_sources }}
+hunter: {{ hunter_yaml }}
+platform: {{ platform_yaml }}
+tactics: {{ tactics_yaml }}
+techniques: {{ techniques_yaml }}
+data_sources: {{ data_sources_yaml }}
 related_hunts: []
 {% if spawned_from %}spawned_from: {{ spawned_from }}
 {% endif %}{% if hypothesis_duration_minutes %}hypothesis_duration_minutes: {{ hypothesis_duration_minutes }}
@@ -227,24 +277,36 @@ def render_hunt_template(
     # Build techniques list
     techniques_list = [technique] if technique else []
 
-    # Format lists as YAML arrays
-    tactics_str = f"[{', '.join(tactics)}]" if tactics else "[]"
-    platform_str = f"[{', '.join(platform)}]" if platform else "[]"
-    data_sources_str = f"[{', '.join(data_sources)}]" if data_sources else "[]"
+    # The frontmatter block gets the *_yaml strings (each item quoted as needed);
+    # the markdown BODY gets the real lists, because it does `techniques[0]`,
+    # `', '.join(techniques)` and `data_sources[0]`. Passing a formatted string
+    # into those turned the body into `[, T, 1, 5, 9, 5, ...]` — one character
+    # per list element. (`data_sources` was already a string upstream, so that
+    # line rendered a bare `[` before this change too.)
     tags_str = "[]"
 
     template = Template(_load_hunt_template())
 
     return str(template.render(
         hunt_id=hunt_id,
+        # `title`/`hunter` stay raw for the markdown H1 and the metadata prose;
+        # the *_yaml pair is what the frontmatter block uses. Both are passed so
+        # a user's custom template written against the old `{{ title }}` name
+        # still renders (unquoted, as it did before) instead of going blank.
         title=title,
+        title_yaml=yaml_scalar(title),
         status="planning",
         date=datetime.now().strftime("%Y-%m-%d"),
         hunter=hunter,
-        platform=platform_str,
-        tactics=tactics_str,
+        hunter_yaml=yaml_scalar(hunter),
+        platform=platform or [],
+        platform_yaml=yaml_flow_list(platform),
+        tactics=tactics or [],
+        tactics_yaml=yaml_flow_list(tactics),
         techniques=techniques_list,
-        data_sources=data_sources_str,
+        techniques_yaml=yaml_flow_list(techniques_list),
+        data_sources=data_sources or [],
+        data_sources_yaml=yaml_flow_list(data_sources),
         tags=tags_str,
         hypothesis=hypothesis,
         threat_context=threat_context,

@@ -1,0 +1,13 @@
+fastapi>=0.115,<0.120
+uvicorn[standard]>=0.30,<0.40
+pydantic>=2.6,<3.0
+# Redis is the source of truth for LLM API keys — UI writes them via the
+# Node API, nebulock-api reads them before invoking each agent so key
+# rotation takes effect without a container restart.
+redis>=5.0,<6.0
+# Provider SDKs — needed for /config/test ping endpoints. athf[all] only
+# ships litellm, not the raw provider SDKs, so we add them explicitly so
+# the UI's "Test" button can run a minimal completion against the real API.
+anthropic>=0.30.0
+openai>=1.0.0
+tavily-python>=0.3.0

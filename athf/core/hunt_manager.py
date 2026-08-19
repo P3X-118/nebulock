@@ -164,20 +164,29 @@ class HuntManager:
         Returns:
             Next hunt ID (e.g., H-0023)
         """
-        hunts = self.list_hunts()
-
-        if not hunts:
-            return f"{prefix}0001"
-
-        # Extract numbers from hunt IDs with matching prefix
-        numbers = []
         pattern = re.compile(rf"^{re.escape(prefix)}(\d+)$")
+        numbers = []
 
-        for hunt in hunts:
+        # Ids claimed by parseable hunts.
+        for hunt in self.list_hunts():
             hunt_id = hunt.get("hunt_id")
             if not hunt_id or not isinstance(hunt_id, str):
                 continue
             match = pattern.match(hunt_id)
+            if match:
+                numbers.append(int(match.group(1)))
+
+        # AND ids claimed by files on disk, whether or not they parse.
+        #
+        # list_hunts() swallows a per-file parse error and moves on, so a hunt
+        # with broken frontmatter is invisible to it — and its id was therefore
+        # handed straight out to the next hunt. That is not hypothetical: a hunt
+        # titled `SCAN: 198.51.100.7` broke its own YAML (see
+        # template_engine.yaml_scalar) and H-0014 was allocated twice, leaving
+        # two files with one id. Allocation must be driven by what EXISTS, not
+        # by what happens to be readable today.
+        for path in self.find_all_hunt_files():
+            match = pattern.match(path.stem)
             if match:
                 numbers.append(int(match.group(1)))
 
