@@ -139,9 +139,38 @@ def seed_keys_from_env_to_redis() -> None:
         except Exception as exc:
             logger.warning("seed failed: %s", exc)
 
-# Ensure required subdirectories exist so managers don't trip over missing paths
-for sub in ("hunts", "research", "investigations"):
-    (WORKSPACE / sub).mkdir(parents=True, exist_ok=True)
+# Ensure required subdirectories exist so managers don't trip over missing paths.
+#
+# The workspace is a BIND MOUNT and this process runs as a non-root uid, so a
+# host-side ownership mismatch is the single most likely misconfiguration. Say
+# so plainly: the bare PermissionError traceback here points at pathlib and
+# reads like a bug in the app rather than "chown the directory".
+#
+# Note this PROBES a write rather than trusting mkdir(exist_ok=True): once the
+# directories exist, mkdir succeeds for a uid that cannot write a single byte
+# into them, so an ownership mismatch sailed past startup and only surfaced as
+# a 500 the first time an analyst tried to save a hunt.
+try:
+    for sub in ("hunts", "research", "investigations"):
+        d = WORKSPACE / sub
+        d.mkdir(parents=True, exist_ok=True)
+        probe = d / ".athf-write-probe"
+        probe.touch()
+        probe.unlink()
+except PermissionError as exc:
+    try:
+        uid, gid = os.getuid(), os.getgid()
+        st = WORKSPACE.stat()
+        owner = f"owned by {st.st_uid}:{st.st_gid}"
+    except Exception:
+        uid = gid = "?"
+        owner = "unreadable"
+    raise SystemExit(
+        f"refusing to start: workspace {WORKSPACE} is not writable "
+        f"(running as {uid}:{gid}, path is {owner}).\n"
+        f"Fix the HOST directory behind the mount:  chown -R {uid}:{gid} <hostdir>\n"
+        f"or run the container as the directory's owner:  docker run --user <uid>:<gid>"
+    ) from exc
 
 # --- Auth ------------------------------------------------------------------
 #

@@ -65,6 +65,28 @@ ENV NEBULOCK_WORKSPACE=/workspace \
 
 EXPOSE 8090
 
+# Don't run as root (estate DS-0002 — same uid/gid as the cooey hub web image).
+# uvicorn binds 8090, above 1024, so no CAP_NET_BIND_SERVICE is needed.
+#
+# This service is not just a server: it WRITES the hunt workspace, which is a
+# bind mount. Running as root meant every hunt file landed root-owned, so the
+# operator could not edit their own hunt records without a container or sudo —
+# that is exactly what happened to the maraudersMap workspace, where a hunt file
+# with broken frontmatter could not be repaired in place.
+#
+# The USER line must sit BELOW every pip install: installing into the global
+# site-packages as a non-root user fails (docker-library/python#414). /opt and
+# /workspace are chowned because COPY/RUN above execute as root.
+#
+# The HOST directory behind /workspace must be owned by this uid. The systemd
+# unit does that (see cooey-hub-nebulock.service); override at run time with
+# `docker run --user $(id -u):$(id -g)` if you want the files owned by a human
+# instead — the app only needs write access, it does not care which uid it is.
+RUN groupadd --system --gid 10001 athf \
+ && useradd  --system --uid 10001 --gid athf --no-create-home --shell /usr/sbin/nologin athf \
+ && chown -R 10001:10001 /opt/nebulock /workspace
+USER 10001:10001
+
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD curl -fsS http://127.0.0.1:8090/health || exit 1
 
