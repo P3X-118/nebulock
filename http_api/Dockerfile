@@ -44,7 +44,9 @@ WORKDIR /opt/nebulock
 # scikit-learn, mitreattack-python and the rest from scratch: ~8 minutes per
 # iteration. The dependency list is still derived from pyproject.toml (never a
 # hand-maintained copy that can drift), it just gets its own layer.
-COPY pyproject.toml README.md MANIFEST.in ./
+# No MANIFEST.in: upstream dropped it at 0.16.0 (3499562) in favour of
+# [tool.setuptools.package-data] in pyproject.toml. Copying it fails the build.
+COPY pyproject.toml README.md ./
 COPY http_api/requirements.txt ./http_api/requirements.txt
 RUN pip install --upgrade pip setuptools wheel \
  && python -c "import tomllib; p = tomllib.load(open('pyproject.toml','rb'))['project']; \

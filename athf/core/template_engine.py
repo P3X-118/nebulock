@@ -2,13 +2,13 @@
 
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Iterable, Optional
 
 import yaml
 from jinja2 import Template
 
 
-def yaml_scalar(value) -> str:
+def yaml_scalar(value: Any) -> str:
     """Render a value as a SAFE YAML scalar for the frontmatter block.
 
     Implemented by asking PyYAML to emit it, rather than by hand-written
@@ -37,15 +37,14 @@ def yaml_scalar(value) -> str:
     # Emit as a one-line mapping and take the value back off. width is set huge
     # so the emitter never line-wraps (a wrapped scalar would break the single
     # frontmatter line), and default_flow_style keeps it inline.
-    dumped = yaml.safe_dump({"v": s}, default_flow_style=False, allow_unicode=True,
-                            width=10 ** 9, sort_keys=False)
-    out = dumped[len("v:"):].strip("\n")
-    if out.endswith("\n..."):                     # document-end marker, if any
+    dumped = yaml.safe_dump({"v": s}, default_flow_style=False, allow_unicode=True, width=10**9, sort_keys=False)
+    out = dumped[len("v:") :].strip("\n")
+    if out.endswith("\n..."):  # document-end marker, if any
         out = out[: -len("\n...")]
     return out.strip()
 
 
-def yaml_flow_list(items) -> str:
+def yaml_flow_list(items: Optional[Iterable[Any]]) -> str:
     """Render a list as a YAML flow sequence with every item safely scalared.
 
     Empty/None entries are dropped rather than rendered as `""` — a blank
@@ -55,6 +54,7 @@ def yaml_flow_list(items) -> str:
     if not kept:
         return "[]"
     return "[" + ", ".join(yaml_scalar(i) for i in kept) + "]"
+
 
 # Default bundled template - used when no custom template exists
 HUNT_TEMPLATE = """---
@@ -287,33 +287,35 @@ def render_hunt_template(
 
     template = Template(_load_hunt_template())
 
-    return str(template.render(
-        hunt_id=hunt_id,
-        # `title`/`hunter` stay raw for the markdown H1 and the metadata prose;
-        # the *_yaml pair is what the frontmatter block uses. Both are passed so
-        # a user's custom template written against the old `{{ title }}` name
-        # still renders (unquoted, as it did before) instead of going blank.
-        title=title,
-        title_yaml=yaml_scalar(title),
-        status="planning",
-        date=datetime.now().strftime("%Y-%m-%d"),
-        hunter=hunter,
-        hunter_yaml=yaml_scalar(hunter),
-        platform=platform or [],
-        platform_yaml=yaml_flow_list(platform),
-        tactics=tactics or [],
-        tactics_yaml=yaml_flow_list(tactics),
-        techniques=techniques_list,
-        techniques_yaml=yaml_flow_list(techniques_list),
-        data_sources=data_sources or [],
-        data_sources_yaml=yaml_flow_list(data_sources),
-        tags=tags_str,
-        hypothesis=hypothesis,
-        threat_context=threat_context,
-        actor=actor,
-        behavior=behavior,
-        location=location,
-        evidence=evidence,
-        spawned_from=spawned_from,
-        hypothesis_duration_minutes=hypothesis_duration_minutes,
-    ))
+    return str(
+        template.render(
+            hunt_id=hunt_id,
+            # `title`/`hunter` stay raw for the markdown H1 and the metadata prose;
+            # the *_yaml pair is what the frontmatter block uses. Both are passed so
+            # a user's custom template written against the old `{{ title }}` name
+            # still renders (unquoted, as it did before) instead of going blank.
+            title=title,
+            title_yaml=yaml_scalar(title),
+            status="planning",
+            date=datetime.now().strftime("%Y-%m-%d"),
+            hunter=hunter,
+            hunter_yaml=yaml_scalar(hunter),
+            platform=platform or [],
+            platform_yaml=yaml_flow_list(platform),
+            tactics=tactics or [],
+            tactics_yaml=yaml_flow_list(tactics),
+            techniques=techniques_list,
+            techniques_yaml=yaml_flow_list(techniques_list),
+            data_sources=data_sources or [],
+            data_sources_yaml=yaml_flow_list(data_sources),
+            tags=tags_str,
+            hypothesis=hypothesis,
+            threat_context=threat_context,
+            actor=actor,
+            behavior=behavior,
+            location=location,
+            evidence=evidence,
+            spawned_from=spawned_from,
+            hypothesis_duration_minutes=hypothesis_duration_minutes,
+        )
+    )
